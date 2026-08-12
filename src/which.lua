@@ -1,95 +1,163 @@
-local ffi = require("ffi")
-
-ffi.cdef[[
-char *getenv(const char *name);
-int access(const char *pathname, int mode);
-]]
-
 local VERSION = "luajit-coreutils which 0.1"
-local X_OK = 1
+
+local opts = {
+    all = false,
+    silent = false
+}
+
+local commands = {}
+
 
 local function help()
-print([[
+    print([[
 Usage: which [OPTION]... COMMAND...
 
 Locate a command.
 
-  -a, --all       print all matching executables
-      --help      display this help
-      --version   output version information
+  -a, --all
+         print all matches in PATH
+
+  -s, --silent
+         no output, only return status
+
+      --skip-alias
+         ignore aliases (compatibility option)
+
+      --help
+         display this help and exit
+      --version
+         output version information and exit
 ]])
 end
 
-local all = false
-local cmds = {}
 
-for _, a in ipairs(arg) do
-    if a == "--help" then
-        help()
-        os.exit(0)
-    elseif a == "--version" then
-        print(VERSION)
-        os.exit(0)
-    elseif a == "-a" or a == "--all" then
-        all = true
-    else
-        cmds[#cmds + 1] = a
-    end
-end
+local function executable(path)
+    local f = io.open(path, "rb")
 
-if #cmds == 0 then
-    io.stderr:write("which: missing command\n")
-    os.exit(1)
-end
-
-local env = ffi.C.getenv("PATH")
-
-if env == nil then
-    os.exit(1)
-end
-
-local PATH = ffi.string(env)
-
-local failed = false
-local seen = {}
-local seen = {}
-
-local function search(cmd)
-    local found = false
-
-    if cmd:find("/") then
-        if ffi.C.access(cmd, X_OK) == 0 then
-            print(cmd)
-            return true
-        end
+    if not f then
         return false
     end
 
-    for dir in PATH:gmatch("[^:]+") do
-        local file = dir .. "/" .. cmd
+    f:close()
 
-        if ffi.C.access(file, X_OK) == 0 then
-            if not seen[file] then
-                print(file)
-                seen[file] = true
-            end
-            found = true
+    local result = os.execute(
+        "[ -x " .. string.format("%q", path) .. " ]"
+    )
 
-            if not all then
+    return result == true or result == 0
+end
+
+
+local function add_unique(tbl, value)
+    for _, v in ipairs(tbl) do
+        if v == value then
+            return
+        end
+    end
+
+    tbl[#tbl + 1] = value
+end
+
+
+local function find_command(cmd)
+
+    local found = {}
+
+    -- If command contains /, do not search PATH
+    if cmd:find("/", 1, true) then
+
+        if executable(cmd) then
+            found[#found + 1] = cmd
+        end
+
+        return found
+    end
+
+
+    local path = os.getenv("PATH") or ""
+
+    for dir in (path .. ":"):gmatch("(.-):") do
+
+        if dir == "" then
+            dir = "."
+        end
+
+        local full = dir .. "/" .. cmd
+
+        if executable(full) then
+            add_unique(found, full)
+
+            if not opts.all then
                 break
             end
         end
     end
 
+
     return found
 end
 
-for _, cmd in ipairs(cmds) do
-    if not search(cmd) then
-        failed = true
+
+for _, arg in ipairs(arg) do
+
+    if arg == "--help" then
+        help()
+        os.exit(0)
+
+    elseif arg == "--version" then
+        print(VERSION)
+        os.exit(0)
+
+    elseif arg == "-a" or arg == "--all" then
+        opts.all = true
+
+    elseif arg == "-s" or arg == "--silent" then
+        opts.silent = true
+
+    elseif arg == "--skip-alias" then
+        -- compatibility with GNU which
+
+    elseif arg:sub(1,1) == "-" then
+        io.stderr:write(
+            "which: invalid option -- '",
+            arg,
+            "'\n"
+        )
+        os.exit(2)
+
+    else
+        commands[#commands + 1] = arg
     end
 end
+
+
+if #commands == 0 then
+    help()
+    os.exit(1)
+end
+
+
+local failed = false
+
+
+for _, cmd in ipairs(commands) do
+
+    local result = find_command(cmd)
+
+    if #result == 0 then
+        failed = true
+    else
+        for _, path in ipairs(result) do
+            if not opts.silent then
+                print(path)
+            end
+        end
+    end
+end
+
 
 if failed then
     os.exit(1)
 end
+
+os.exit(0)

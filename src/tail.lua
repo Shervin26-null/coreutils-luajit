@@ -78,6 +78,9 @@ while i <= #arg do
     elseif a:match("^%-n%d+$") then
         opts.lines = parse_num(a:sub(3))
 
+    elseif a:match("^%-%d+$") then
+        opts.lines = parse_num(a:sub(2))
+
     elseif a:match("^%-%-lines=") then
         opts.lines = parse_num(a:match("=(.*)"))
 
@@ -90,6 +93,10 @@ while i <= #arg do
 
     elseif a:match("^%-%-bytes=") then
         opts.bytes = parse_num(a:match("=(.*)"))
+
+    elseif a:sub(1,1) == "-" and a ~= "-" then
+        io.stderr:write("tail: invalid option -- '", a:sub(2,2), "'\n")
+        os.exit(1)
 
     else
         files[#files + 1] = a

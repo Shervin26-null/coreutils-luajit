@@ -162,7 +162,42 @@ for _,a in ipairs(arg) do
         os.exit(0)
 
     elseif a=="--help" then
-        print("Usage: chmod [OPTION]... MODE FILE...")
+        print([[
+Usage: chmod [OPTION]... MODE FILE...
+  or:  chmod [OPTION]... OCTAL-MODE FILE...
+  or:  chmod [OPTION]... --reference=RFILE FILE...
+
+Change the permissions of each FILE.
+
+Options:
+  -c, --changes
+         report only when a change is made
+  -R, --recursive
+         change files and directories recursively
+  -v, --verbose
+         output a diagnostic for every file processed
+      --reference=RFILE
+         use RFILE's mode instead of MODE
+
+      --help
+         display this help and exit
+      --version
+         output version information and exit
+
+MODE:
+  Octal modes:
+    755, 0644, etc.
+
+  Symbolic modes:
+    [ugoa]*([-+=][rwxst]*)
+
+Permission bits:
+  r  read
+  w  write
+  x  execute
+  s  set-user-ID/set-group-ID
+  t  sticky bit
+]])
         os.exit(0)
 
     elseif a=="-v" or a=="--verbose" then

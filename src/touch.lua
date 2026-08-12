@@ -1,122 +1,267 @@
-#!/usr/bin/env luajit
-
 local ffi = require("ffi")
 local bit = require("bit")
+
+local VERSION = "luajit-coreutils touch 0.1"
 
 ffi.cdef[[
 typedef long time_t;
 
-typedef struct {
+struct timespec {
     time_t tv_sec;
-    long tv_usec;
-} timeval;
+    long tv_nsec;
+};
 
-int open(const char *pathname, int flags, unsigned int mode);
+int open(const char *pathname, int flags, ...);
 int close(int fd);
-int utimes(const char *filename, const timeval times[2]);
-int stat(const char *path, void *buf);
-int access(const char *pathname, int mode);
-char *strerror(int errnum);
+int chmod(const char *pathname, unsigned int mode);
+
+int utimensat(
+    int dirfd,
+    const char *pathname,
+    const struct timespec times[2],
+    int flags
+);
 ]]
 
-local C = ffi.C
-
-local VERSION = "luajit-coreutils touch 0.1"
-
 local O_WRONLY = 1
-local O_CREAT  = 64
-local O_APPEND = 1024
+local O_CREAT = 64
 
-local created = true
-local no_create = false
-local access_time = true
-local modify_time = true
+local MODE = tonumber("644", 8)
+local AT_FDCWD = -100
 
+local create = true
+local only_access = false
+local only_modify = false
+local reference = nil
+local timestamp = nil
+local ref_atime = nil
+local ref_mtime = nil
+local reference = nil
 local files = {}
 
-local function die(msg)
-    io.stderr:write("touch: " .. msg .. "\n")
-    os.exit(1)
+
+local function help()
+    print([[
+Usage: touch [OPTION]... FILE...
+
+Update file timestamps.
+
+  -a
+         change only access time
+
+  -m
+         change only modification time
+
+  -c, --no-create
+         do not create files
+
+  -r, --reference FILE
+         use this file timestamps
+
+  -t TIME
+         use specified time
+
+      --help
+         display help
+
+      --version
+         output version information
+]])
 end
+
 
 local function exists(path)
-    local buf = ffi.new("char[512]")
-    return C.stat(path, buf) == 0
+    local f = io.open(path, "rb")
+
+    if f then
+        f:close()
+        return true
+    end
+
+    return false
 end
 
+
 local function create_file(path)
-    local fd = C.open(
+
+    local fd = ffi.C.open(
         path,
-        bit.bor(O_WRONLY, O_CREAT, O_APPEND),
-        420
+        bit.bor(O_WRONLY, O_CREAT),
+        MODE
     )
 
     if fd < 0 then
         return false
     end
 
-    C.close(fd)
+    ffi.C.close(fd)
+    ffi.C.chmod(path, MODE)
+
     return true
 end
 
-local function update_time(path)
-    local now = os.time()
 
-    local tv = ffi.new("timeval[2]")
+local function parse_time(str)
 
-    tv[0].tv_sec = now
-    tv[0].tv_usec = 0
+    if str == "now" or str == "today" then
+        return os.time()
+    end
 
-    tv[1].tv_sec = now
-    tv[1].tv_usec = 0
+    local y,m,d,h,mi,se =
+        str:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)[ T](%d%d):(%d%d):(%d%d)$")
 
-    if C.utimes(path, tv) ~= 0 then
+    if y then
+        return os.time({
+            year=tonumber(y),
+            month=tonumber(m),
+            day=tonumber(d),
+            hour=tonumber(h),
+            min=tonumber(mi),
+            sec=tonumber(se)
+        })
+    end
+
+    local date, sec = str:match("^(%d+)%.?(%d*)$")
+
+    if not date then
+        return nil
+    end
+
+    sec = tonumber(sec) or 0
+
+    if #date ~= 12 then
+        return nil
+    end
+
+    return os.time({
+        year = tonumber(date:sub(1,4)),
+        month = tonumber(date:sub(5,6)),
+        day = tonumber(date:sub(7,8)),
+        hour = tonumber(date:sub(9,10)),
+        min = tonumber(date:sub(11,12)),
+        sec = sec
+    })
+end
+
+
+
+local function read_reference(path)
+
+    local f = io.popen(
+        "stat -c '%X %Y' " .. string.format("%q", path)
+    )
+
+    if not f then
         return false
     end
 
-    return true
+    local line = f:read("*l")
+    f:close()
+
+    if not line then
+        return false
+    end
+
+    ref_atime, ref_mtime = line:match("(%d+) (%d+)")
+
+    if ref_atime then
+        ref_atime = tonumber(ref_atime)
+        ref_mtime = tonumber(ref_mtime)
+        return true
+    end
+
+    return false
+end
+
+local function update_time(path)
+
+    local ts = ffi.new("struct timespec[2]")
+
+    local t = timestamp or os.time()
+
+
+    if only_access then
+        ts[0].tv_sec = t
+        ts[0].tv_nsec = 0
+
+        ts[1].tv_sec = 0
+        ts[1].tv_nsec = 1073741823
+
+    elseif only_modify then
+        ts[0].tv_sec = 0
+        ts[0].tv_nsec = 1073741823
+
+        ts[1].tv_sec = t
+        ts[1].tv_nsec = 0
+
+    elseif ref_atime and ref_mtime then
+        ts[0].tv_sec = ref_atime
+        ts[0].tv_nsec = 0
+
+        ts[1].tv_sec = ref_mtime
+        ts[1].tv_nsec = 0
+
+    else
+        ts[0].tv_sec = t
+        ts[0].tv_nsec = 0
+
+        ts[1].tv_sec = t
+        ts[1].tv_nsec = 0
+    end
+
+    local ret = ffi.C.utimensat(
+        AT_FDCWD,
+        path,
+        ts,
+        0
+    )
+
+    return ret == 0
 end
 
 
 local i = 1
 
 while i <= #arg do
+
     local a = arg[i]
 
     if a == "--help" then
-        print([[
-Usage: touch [OPTION]... FILE...
-
-Update the access and modification times of each FILE.
-
-  -a            change only access time
-  -m            change only modification time
-  -c            do not create any files
-      --no-create  do not create any files
-      --help     display this help and exit
-      --version  output version information and exit
-]])
+        help()
+        os.exit(0)
 
     elseif a == "--version" then
         print(VERSION)
+        os.exit(0)
 
     elseif a == "-a" then
-        modify_time = false
+        only_access = true
+        only_modify = false
 
     elseif a == "-m" then
-        access_time = false
+        only_modify = true
+        only_access = false
 
     elseif a == "-c" or a == "--no-create" then
-        no_create = true
+        create = false
 
-    elseif a == "--" then
-        for j = i + 1, #arg do
-            files[#files+1] = arg[j]
-        end
-        break
+    elseif a == "-r" or a == "--reference" then
+        i = i + 1
+        reference = arg[i]
 
-    elseif a:sub(1,1) == "-" then
-        die("invalid option '" .. a .. "'")
+    elseif a:match("^%-%-reference=") then
+        reference = a:match("=(.*)")
+
+    elseif a == "-t" then
+        i = i + 1
+        timestamp = parse_time(arg[i])
+
+    elseif a == "-d" or a == "--date" then
+        i = i + 1
+        timestamp = parse_time(arg[i])
+
+    elseif a:match("^%-%-date=") then
+        timestamp = parse_time(a:match("=(.*)"))
 
     else
         files[#files+1] = a
@@ -126,98 +271,45 @@ Update the access and modification times of each FILE.
 end
 
 
+if reference then
+    if not read_reference(reference) then
+        io.stderr:write(
+            "touch: cannot stat '",
+            reference,
+            "'\n"
+        )
+        os.exit(1)
+    end
+end
+
+
 if #files == 0 then
-    die("missing file operand")
+    help()
+    os.exit(1)
 end
 
 
 for _, file in ipairs(files) do
 
-    if not exists(file) then
-        if not no_create then
-            if not create_file(file) then
-                die("cannot touch '" .. file .. "': " ..
-                    ffi.string(C.strerror(ffi.errno())))
-            end
-        else
+    local ok = exists(file)
+
+    if not ok then
+
+        if not create then
             goto continue
         end
-    end
 
-
-    if not update_time(file) then
-        die("cannot touch '" .. file .. "': " ..
-            ffi.string(C.strerror(ffi.errno())))
-    end
-
-    ::continue::
-end
-
-
--- GNU compatibility extensions
-
-local function parse_time(value)
-    local t = os.time()
-
-    if value == "now" then
-        return t
-    end
-
-    local y,m,d,h,min,s =
-        value:match("^(%d%d%d%d)-(%d%d)-(%d%d)T(%d%d):(%d%d):?(%d*)")
-
-    if y then
-        return os.time({
-            year=tonumber(y),
-            month=tonumber(m),
-            day=tonumber(d),
-            hour=tonumber(h),
-            min=tonumber(min),
-            sec=tonumber(s ~= "" and s or "0")
-        })
-    end
-
-    return nil
-end
-
-
-local reference = nil
-local no_create = false
-local access_time = nil
-local modify_time = nil
-
-
-local old_args = arg
-arg = {}
-
-local i = 1
-while i <= #old_args do
-    local a = old_args[i]
-
-    if a == "-a" then
-        access_time = true
-
-    elseif a == "-m" then
-        modify_time = true
-
-    elseif a == "-c" or a == "--no-create" then
-        no_create = true
-
-    elseif a == "-r" or a == "--reference" then
-        i = i + 1
-        reference = old_args[i]
-
-    elseif a == "-d" or a == "--date" then
-        i = i + 1
-        local t = parse_time(old_args[i])
-        if not t then
-            io.stderr:write("touch: invalid date format\n")
+        if not create_file(file) then
+            io.stderr:write(
+                "touch: cannot create '",
+                file,
+                "'\n"
+            )
             os.exit(1)
         end
-
-    else
-        arg[#arg+1] = a
     end
 
-    i = i + 1
+    update_time(file)
+
+    ::continue::
 end
