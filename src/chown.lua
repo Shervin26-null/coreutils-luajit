@@ -1,0 +1,216 @@
+local ffi = require("ffi")
+
+local VERSION = "chown (coreutils-luajit) 0.1"
+
+ffi.cdef[[
+typedef unsigned int uid_t;
+typedef unsigned int gid_t;
+
+int chown(const char *path, uid_t owner, gid_t group);
+int lchown(const char *path, uid_t owner, gid_t group);
+
+typedef struct DIR DIR;
+DIR *opendir(const char *);
+int closedir(DIR *);
+void *readdir(DIR *);
+
+struct passwd {
+    char *pw_name;
+    char *pw_passwd;
+    uid_t pw_uid;
+    gid_t pw_gid;
+    char *pw_gecos;
+    char *pw_dir;
+    char *pw_shell;
+};
+
+struct group {
+    char *gr_name;
+    char *gr_passwd;
+    gid_t gr_gid;
+    char **gr_mem;
+};
+
+struct passwd *getpwnam(const char *);
+struct group *getgrnam(const char *);
+]]
+
+local C = ffi.C
+
+local recursive = false
+local no_deref = false
+local verbose = false
+local changes = false
+local silent = false
+local reference = nil
+local owner = nil
+local group = nil
+local files = {}
+local function parse_id(name, is_group)
+    if not name or name == "" then
+        return -1
+    end
+
+    local n = tonumber(name)
+    if n then
+        return n
+    end
+
+    if is_group then
+        local g = C.getgrnam(name)
+        if g == nil then
+            return nil
+        end
+        return tonumber(g.gr_gid)
+    else
+        local p = C.getpwnam(name)
+        if p == nil then
+            return nil
+        end
+        return tonumber(p.pw_uid)
+    end
+end
+
+local expanded = {}
+
+for _, a in ipairs(arg) do
+    if a:sub(1,1) == "-" and not a:match("^%-%-") and #a > 2 then
+        for j = 2, #a do
+            expanded[#expanded+1] = "-" .. a:sub(j,j)
+        end
+    else
+        expanded[#expanded+1] = a
+    end
+end
+
+arg = expanded
+
+local i = 1
+
+while i <= #arg do
+    local a = arg[i]
+
+    if a == "--help" then
+        print([=[
+Usage: chown [OPTION]... [OWNER][:[GROUP]] FILE...
+
+  -c, --changes
+  -f, --silent
+  -v, --verbose
+  -h, --no-dereference
+  -R, --recursive
+      --reference=RFILE
+      --help
+      --version
+]=])
+        os.exit(0)
+
+    elseif a == "--version" then
+        print(VERSION)
+        os.exit(0)
+
+    elseif a == "-R" or a == "--recursive" then
+        recursive = true
+
+    elseif a == "-h" or a == "--no-dereference" then
+        no_deref = true
+
+    elseif a == "-v" or a == "--verbose" then
+        verbose = true
+
+    elseif a == "-c" or a == "--changes" then
+        changes = true
+
+    elseif a == "-f" or a == "--silent" or a == "--quiet" then
+        silent = true
+
+    elseif a:match("^%-%-reference=") then
+        reference = a:match("^%-%-reference=(.*)$")
+
+    elseif not owner then
+        local o,g = a:match("^([^:]*):?(.*)$")
+        owner = o ~= "" and o or nil
+
+        if a:find(":") then
+            group = g ~= "" and g or nil
+        else
+            group = nil
+        end
+
+    else
+        files[#files+1] = a
+    end
+
+    i = i + 1
+end
+
+if reference then
+    local st = io.popen("stat -c '%u:%g' "..reference)
+    local x = st:read("*a")
+    st:close()
+    owner, group = x:match("(%d+):(%d+)")
+end
+
+local uid = parse_id(owner, false)
+local gid = parse_id(group, true)
+
+if uid == nil or gid == nil then
+    if not silent then
+        io.stderr:write("chown: invalid user or group\n")
+    end
+    os.exit(1)
+end
+
+
+local function apply(path)
+    local r
+
+    if no_deref then
+        r = C.lchown(path, uid or -1, gid or -1)
+    else
+        r = C.chown(path, uid or -1, gid or -1)
+    end
+
+    if r ~= 0 then
+        if not silent then
+            io.stderr:write("chown: cannot change ownership of '", path, "'\n")
+        end
+        return false
+    end
+
+    if verbose then
+        print("changed ownership of '"..path.."'")
+    end
+
+    return true
+end
+local function walk(path)
+    apply(path)
+
+    if not recursive then
+        return
+    end
+
+    local d = C.opendir(path)
+    if d == nil then
+        return
+    end
+
+    while true do
+        local e = C.readdir(d)
+        if e == nil then
+            break
+        end
+    end
+
+    C.closedir(d)
+end
+
+
+if #files == 0 then
+    io.stderr:write("chown: missing operand\n")
+    os.exit(1)
+end
+for _, f in ipairs(files) do
+    walk(f)
+end
