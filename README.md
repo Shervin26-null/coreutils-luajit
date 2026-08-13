@@ -35,8 +35,15 @@ It does not use GNU Coreutils source code.
 
 Currently implemented:
 
-basename.lua cat.lua chmod.lua cp.lua cut.lua date.lua dirname.lua echo.lua env.lua false.lua head.lua hostname.lua ln.lua mkdir.lua mv.lua printenv.lua printf.lua pwd.lua readlink.lua realpath.lua rm.lua seq.lua sleep.lua sort.lua tail.lua touch.lua true.lua uname.lua uniq.lua wc.lua which.lua whoami.lua yes.lua
-
+basename.lua  env.lua       ln.lua        pwd.lua       tee.lua       uniq.lua
+cat.lua       expand.lua    ls.lua        readlink.lua  test.lua      wc.lua
+chmod.lua     false.lua     mkdir.lua     realpath.lua  touch.lua     which.lua
+cp.lua        fold.lua      mv.lua        rm.lua        tr.lua        whoami.lua
+cut.lua       grep.lua      nl.lua        rmdir.lua     true.lua      yes.lua
+date.lua      head.lua      nproc.lua     seq.lua       truncate.lua
+dd.lua        hostname.lua  paste.lua     sleep.lua     tty.lua
+dirname.lua   id.lua        printenv.lua  sort.lua      uname.lua
+echo.lua      install.lua   printf.lua    tail.lua      unexpand.lua
 More commands will be added later.
 
 ## Dependencies
@@ -73,9 +80,9 @@ Optional:
 ```bash
 sudo pacman -S luajit luarocks base-devel
 luarocks install luastatic
-
-Debian / Ubuntu
-
+```
+### Debian / Ubuntu
+```bash
 sudo apt update
 sudo apt install \
 luajit \
@@ -84,9 +91,9 @@ build-essential \
 luarocks
 
 luarocks install luastatic
-
-Fedora
-
+```
+### Fedora
+```bash
 sudo dnf install \
 luajit \
 luajit-devel \
@@ -95,9 +102,9 @@ make \
 luarocks
 
 luarocks install luastatic
-
-Alpine Linux
-
+```
+### Alpine Linux
+```bash
 sudo apk add \
 luajit \
 luajit-dev \
@@ -105,9 +112,9 @@ build-base \
 luarocks
 
 luarocks install luastatic
-
-Gentoo
-
+```
+### Gentoo
+```bash
 sudo emerge \
 dev-lang/luajit \
 dev-util/luarocks \
@@ -115,9 +122,9 @@ sys-devel/gcc \
 sys-devel/make
 
 luarocks install luastatic
-
-Termux (Android)
-
+```
+### Termux (Android)
+```bash
 pkg install \
 luajit \
 clang \
@@ -125,77 +132,77 @@ make \
 luarocks
 
 luarocks install luastatic
-
+```
 Build
 
 Clone:
-
-git clone https://github.com/YOUR_USERNAME/coreutils-luajit.git
+```bash
+git clone https://github.com/Shervin26-null/coreutils-luajit.git
 cd coreutils-luajit
-
+```
 Build everything:
-
-make all
-
+```bash
+make
+```
 Build a single command:
-
+```bash
 make cp
-
+```
 Example:
-
+```bash
 make sort
 make wc
 make tail
-
+```
 Clean build files:
-
+```bash
 make clean
-
+```
 Install
 
 Install all compiled commands:
-
-make install
-
+```bash
+make install-bin
+```
 By default commands are installed to:
-
+```bash
 ~/.local/bin
-
+```
 Add it to your PATH.
 
 Bash
-
+```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
-
+```
 Zsh
-
+```zsh
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
-
+```
 Verify:
-
+```bash
 cp --version
 wc --help
 sort --help
-
+```
 Manual Usage
 
 Commands can also be executed directly:
-
+```bash
 luajit src/cp.lua file1 file2
-
+```
 Standalone Binaries
 
 Using luastatic:
-
+```bash
 luastatic src/cp.lua \
 -I$PREFIX/include/luajit-2.1 \
 -L$PREFIX/lib \
 -luajit-5.1 \
 -lm \
 -o cp
-
+```
 Development
 
 This project is actively developed.
